@@ -1,0 +1,56 @@
+froend/src/components/Player.js
+----------------------------------
+import React from 'react';
+
+export default function Player({ track }){
+  const audioRef = React.useRef(null);
+  
+  React.useEffect(()=>{ 
+    if(track && audioRef.current){ 
+      audioRef.current.load(); 
+      audioRef.current.play().catch(()=>{
+        console.log("Autoplay blocked. User must click play.");
+      }); 
+    } 
+  }, [track]);
+  
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+  if(!track) return <div className="player muted" style={{textAlign:'center'}}>No track selected</div>;
+  return (
+    <div className="player">
+      <div style={{marginBottom:'8px'}}>
+        <strong>{track.title}</strong>
+        <div className="muted">{track.artist}</div>
+      </div>
+      <audio controls ref={audioRef} style={{ width: '60%' }}>
+        <source src={`${API_URL}/uploads/${track.filename}`} type="audio/mpeg" />
+        Your browser does not support the audio element.
+      </audio>
+    </div>
+  );
+}
+
+TrackCard.js
+----------------
+import React from 'react';
+
+export default function TrackCard({ track, onPlay }){
+  // Use REACT_APP_API_URL for the download path
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+    
+  return (
+    <div className="track-card">
+      <div>
+        <strong>{track.title}</strong>
+        <div className="muted">{track.artist}</div>
+      </div>
+      <div style={{display:'flex', gap: '8px'}}>
+        <button onClick={()=>onPlay(track)}>Play</button>
+        <a href={`${API_URL}/uploads/${track.filename}`} download>
+          <button style={{backgroundColor:'#eee'}}>Download</button>
+        </a>
+      </div>
+    </div>
+  );
+}
