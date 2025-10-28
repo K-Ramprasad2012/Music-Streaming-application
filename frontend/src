@@ -1,0 +1,494 @@
+froendend/src/components/players.js
+--------------------------------------
+import React from 'react';
+
+export default function Player({ track }){
+  const audioRef = React.useRef(null);
+  
+  React.useEffect(()=>{ 
+    if(track && audioRef.current){ 
+      audioRef.current.load(); 
+      audioRef.current.play().catch(()=>{
+        console.log("Autoplay blocked. User must click play.");
+      }); 
+    } 
+  }, [track]);
+  
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+  if(!track) return <div className="player muted" style={{textAlign:'center'}}>No track selected</div>;
+  return (
+    <div className="player">
+      <div style={{marginBottom:'8px'}}>
+        <strong>{track.title}</strong>
+        <div className="muted">{track.artist}</div>
+      </div>
+      <audio controls ref={audioRef} style={{ width: '60%' }}>
+        <source src={`${API_URL}/uploads/${track.filename}`} type="audio/mpeg" />
+        Your browser does not support the audio element.
+      </audio>
+    </div>
+  );
+}
+
+froendend/src/components/TrackCard.js
+--------------------------------------
+import React from 'react';
+
+export default function TrackCard({ track, onPlay }){
+  // Use REACT_APP_API_URL for the download path
+  const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+    
+  return (
+    <div className="track-card">
+      <div>
+        <strong>{track.title}</strong>
+        <div className="muted">{track.artist}</div>
+      </div>
+      <div style={{display:'flex', gap: '8px'}}>
+        <button onClick={()=>onPlay(track)}>Play</button>
+        <a href={`${API_URL}/uploads/${track.filename}`} download>
+          <button style={{backgroundColor:'#eee'}}>Download</button>
+        </a>
+      </div>
+    </div>
+  );
+}
+
+
+froendend/src/pages/AuthPage.js
+--------------------------------------
+import React, { useState } from 'react';
+import Login from './Login';
+import Register from './Register';
+
+export default function AuthPage() {
+  const [showLogin, setShowLogin] = useState(true);
+
+  return (
+    <div>
+      {showLogin ? (
+        <>
+          <Login onDone={() => alert('Logged in!')} />
+          <p>
+            Don't have an account?{' '}
+            <button onClick={() => setShowLogin(false)}>Register</button>
+          </p>
+        </>
+      ) : (
+        <>
+          <Register onDone={() => setShowLogin(true)} />
+          <p>
+            Already have an account?{' '}
+            <button onClick={() => setShowLogin(true)}>Login</button>
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+froendend/src/pages/Home.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+import TrackCard from '../components/TrackCard';
+import Player from '../components/Player'; // Player is now in App.js footer, but keeping for reference
+
+export default function Home({ onPlay }){
+  const [tracks, setTracks] = React.useState([]);
+  const [file,setFile]=React.useState(null);
+  const [title,setTitle]=React.useState('');
+  const [artist,setArtist]=React.useState('');
+
+  const fetch = async ()=>{
+    const res = await API.get('/api/tracks');
+    setTracks(res.data);
+  };
+  React.useEffect(()=>{ fetch(); }, []);
+
+  const upload = async e => {
+    e.preventDefault();
+    if(!file) return alert('Choose a file');
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('title', title);
+    fd.append('artist', artist);
+    await API.post('/api/tracks/upload', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+    setFile(null); setTitle(''); setArtist('');
+    fetch(); // Re-fetch tracks after successful upload
+  };
+
+  return (
+    <div className="home">
+      <div className="left">
+        <form className="card" onSubmit={upload}>
+          <h3>Upload track</h3>
+          <input placeholder="Title" value={title} onChange={e=>setTitle(e.target.value)} />
+          <input placeholder="Artist" value={artist} onChange={e=>setArtist(e.target.value)} />
+          <input type="file" accept="audio/*" onChange={e=>setFile(e.target.files[0])} />
+          <button type="submit">Upload</button>
+        </form>
+
+        <div className="tracks">
+          {tracks.map(t=> <TrackCard key={t._id} track={t} onPlay={onPlay} />)}
+          {tracks.length === 0 && <div className="muted" style={{textAlign:'center', padding:'20px'}}>No tracks uploaded yet.</div>}
+        </div>
+      </div>
+      <div className="right">
+        {/* The Player component is moved to the App.js footer for persistence */}
+        <div className="card">Dashboard/Stats Placeholder</div> 
+      </div>
+    </div>
+  );
+}
+
+froendend/src/pages/Login.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+
+export default function Login({ onDone }) {
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const submit = async e => {
+    e.preventDefault();
+    try {
+      const res = await API.post('/api/auth/login', { email, password });
+      localStorage.setItem('accessToken', res.data.token);
+      localStorage.setItem('refreshToken', res.data.refreshToken);
+      onDone && onDone();
+      window.location.reload();
+    } catch (err) {
+      setErr(err.response?.data?.msg || 'Login failed');
+    }
+  };
+  return (
+    <form className="card" onSubmit={submit}>
+      <h2>Login</h2>
+      {err && <div className="error">{err}</div>}
+      <input placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
+      <input placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+      <button type="submit">Login</button>
+    </form>
+  );
+}
+
+froendend/src/pages/Playlists.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+
+export default function Playlists(){
+  const [my, setMy] = React.useState([]);
+  const [name,setName]=React.useState('');
+  const [error, setError] = React.useState('');
+
+  const fetch = async ()=>{
+    const res = await API.get('/api/playlists/me');
+    setMy(res.data);
+  };
+  React.useEffect(()=>{ fetch(); }, []);
+
+  const create = async e => { 
+    e.preventDefault(); 
+    if(!name.trim()) return setError('Playlist name is required.');
+    try {
+        await API.post('/api/playlists', { name }); 
+        setName(''); 
+        setError('');
+        fetch(); 
+    } catch (err) {
+        setError(err.response?.data?.msg || 'Failed to create playlist.');
+    }
+  };
+
+  return (
+    <div>
+      <h2>My Playlists</h2>
+      <form className="card" onSubmit={create} style={{display:'flex', gap:'8px', flexDirection:'column'}}>
+        {error && <div className="error">{error}</div>}
+        <input placeholder="Playlist name" value={name} onChange={e=>setName(e.target.value)} />
+        <button type="submit">Create Playlist</button>
+      </form>
+      <div>
+        {my.map(p=> (
+          <div key={p._id} className="card" style={{ marginTop:8 }}>
+            <strong>{p.name}</strong>
+            <div className="muted">{p.description || 'No description'}</div>
+            <div className="muted" style={{marginTop:'4px'}}>Tracks: {p.tracks?.length || 0}</div>
+          </div>
+        ))}
+      </div>
+      {my.length === 0 && <div className="muted" style={{textAlign:'center', padding:'20px'}}>You have no playlists. Create one above!</div>}
+    </div>
+  );
+}
+froendend/src/pages/Profile.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+
+export default function Profile() {
+  const [user, setUser ] = React.useState(null);
+  
+  React.useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const res = await API.get('/api/auth/me');
+        setUser (res.data);
+      } catch (e) {
+        console.error("Failed to fetch profile.");
+      }
+    };
+    fetchProfile();
+  }, []);
+
+  if (!localStorage.getItem('accessToken')) return <div className="card">Login to see your profile</div>;
+  if (!user) return <div className="card">Loading profile...</div>;
+  
+  return (
+    <div className="card profile-card">
+      <h3 style={{marginBottom:'4px'}}>{user.name}</h3>
+      <div className="muted">{user.email}</div>
+      <div className="muted" style={{marginTop: '10px'}}>User  ID: {user._id}</div>
+      <div className="muted">Joined: {new Date(user.createdAt).toLocaleDateString()}</div>
+    </div>
+  );
+}
+
+froendend/src/pages/Register.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+
+export default function Register({ onDone }) {
+  const [name, setName] = React.useState('');
+  const [email, setEmail] = React.useState('');
+  const [password, setPassword] = React.useState('');
+  const [err, setErr] = React.useState('');
+  const submit = async e => {
+    e.preventDefault();
+    try {
+      const res = await API.post('/api/auth/register', { name, email, password });
+      // Optional auto-login (uncomment for seamless flow):
+      // localStorage.setItem('accessToken', res.data.token);
+      // localStorage.setItem('refreshToken', res.data.refreshToken);
+      // onDone && onDone();
+      // window.location.reload();
+      onDone && onDone();  // Redirect to login
+    } catch (err) {
+      setErr(err.response?.data?.msg || 'Register failed');
+    }
+  };
+  return (
+    <form className="card" onSubmit={submit}>
+      <h2>Register</h2>
+      {err && <div className="error">{err}</div>}
+      <input placeholder="Name" value={name} onChange={e=>setName(e.target.value)} />
+      <input placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)} />
+      <input placeholder="Password" type="password" value={password} onChange={e=>setPassword(e.target.value)} />
+      <button type="submit">Register</button>
+    </form>
+  );
+}
+
+
+froendend/src/pages/Search.js
+--------------------------------------
+import React from 'react';
+import API from '../api';
+import TrackCard from '../components/TrackCard';
+
+export default function Search({ onPlay }){
+  const [q,setQ]=React.useState('');
+  const [res,setRes]=React.useState([]);
+  
+  const search = async e =>{ 
+    e.preventDefault(); 
+    if(!q.trim()) return setRes([]);
+    const r = await API.get('/api/search', { params:{ q } }); 
+    setRes(r.data); 
+  };
+  
+  return (
+    <div className="search-page">
+      <form className="card" onSubmit={search} style={{display:'flex', gap: '8px'}}>
+        <input placeholder="Search tracks or artists" value={q} onChange={e=>setQ(e.target.value)} style={{flexGrow: 1}} />
+        <button type="submit">Search</button>
+      </form>
+      <div className="tracks">
+        {res.map(t=> <TrackCard key={t._id} track={t} onPlay={onPlay} />)}
+      </div>
+      {res.length === 0 && q.trim() && <div className="muted" style={{textAlign:'center', padding:'20px'}}>No results found for "{q}"</div>}
+      {res.length === 0 && !q.trim() && <div className="muted" style={{textAlign:'center', padding:'20px'}}>Start typing to search tracks...</div>}
+    </div>
+  );
+}
+
+
+froendend/src/app.js
+--------------------------------------
+import axios from 'axios';
+const API = axios.create({ baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000' });
+
+// Request Interceptor: Attach Access Token
+API.interceptors.request.use(cfg => {
+  const token = localStorage.getItem('accessToken');
+  if (token) cfg.headers.Authorization = `Bearer ${token}`;
+  return cfg;
+});
+
+// Response Interceptor: Attempt token refresh on 401
+API.interceptors.response.use(r => r, async err => {
+  const original = err.config;
+  const refreshToken = localStorage.getItem('refreshToken');
+  
+  if (err.response?.status === 401 && !original._retry && refreshToken){
+    original._retry = true;
+    try{
+      const res = await axios.post((process.env.REACT_APP_API_URL || 'http://localhost:5000') + '/api/auth/refresh', { refreshToken });
+      
+      localStorage.setItem('accessToken', res.data.token);
+      original.headers.Authorization = `Bearer ${res.data.token}`;
+      return axios(original);
+    }catch(e){
+      // Refresh failed — force logout
+      localStorage.removeItem('accessToken');
+      localStorage.removeItem('refreshToken');
+      window.location.reload();
+      return Promise.reject(e);
+    }
+  }
+  return Promise.reject(err);
+});
+
+export default API;
+
+
+
+froendend/src/App.js
+--------------------------------------
+import React from 'react';
+import Home from './pages/Home';
+import Login from './pages/Login';
+import Register from './pages/Register';
+import Search from './pages/Search';
+import Playlists from './pages/Playlists';
+import Profile from './pages/Profile';
+import Player from './components/Player';
+
+export default function App(){
+  const [page, setPage] = React.useState('home');
+  const [selectedTrack, setSelectedTrack] = React.useState(null);
+  const token = localStorage.getItem('accessToken'); 
+
+  React.useEffect(()=>{ 
+    if(!token && page !== 'register') {
+      setPage('login'); 
+    } else if (token && (page === 'login' || page === 'register')) {
+      setPage('home');
+    }
+  }, [token, page]);
+  
+  const handleLogout = () => { 
+    localStorage.removeItem('accessToken'); 
+    localStorage.removeItem('refreshToken'); 
+    window.location.reload(); 
+  };
+  
+  return (
+    <div className="app">
+      <header className="topbar">
+        <h1 onClick={()=>setPage('home')}>My Spotify</h1>
+        <div className="nav">
+          {token && <button onClick={()=>setPage('search')}>Search</button>}
+          {token && <button onClick={()=>setPage('playlists')}>Playlists</button>}
+          {token && <button onClick={()=>setPage('profile')}>Profile</button>}
+          {!token && <button onClick={()=>setPage('login')}>Login</button>}
+          {!token && <button onClick={()=>setPage('register')}>Register</button>}
+          {token && <button onClick={handleLogout}>Logout</button>}
+        </div>
+      </header>
+      <main>
+        {page === 'home' && <Home onPlay={setSelectedTrack} />} 
+        {page === 'search' && <Search onPlay={setSelectedTrack} />} 
+        {page === 'playlists' && <Playlists />}
+        {page === 'profile' && <Profile />}
+        {page === 'login' && <Login onDone={()=>setPage('home')} />}
+        {page === 'register' && <Register onDone={()=>setPage('login')} />}
+      </main>
+      <footer>
+        <Player track={selectedTrack} />
+      </footer>
+    </div>
+  );
+}
+
+
+
+froendend/src/index.js
+--------------------------------------
+import React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
+import './styles.css';  // Ensure file is named styles.css
+
+createRoot(document.getElementById('root')).render(<App />);
+
+
+froendend/src/style.css
+--------------------------------------
+body{ font-family: Arial, Helvetica, sans-serif; margin:0; background:#f6f7fb; }
+/* Header/Navigation */
+.topbar{ display:flex; justify-content:space-between; align-items:center; padding:12px 18px; background:#111; color:#fff }
+.topbar h1{ cursor:pointer; font-size: 24px; margin: 0; }
+.topbar .nav button { margin-left: 8px; background: #fff; color: #111; padding: 6px 10px; }
+.app main{ padding:20px; padding-bottom: 100px; /* Space for fixed footer */ }
+
+/* General UI */
+.card{ background:#fff; padding:12px; border-radius:8px; box-shadow:0 2px 6px rgba(0,0,0,0.08); margin-bottom:12px }
+.card input { display: block; width: 100%; padding: 10px; margin: 6px 0 12px 0; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+.card button[type="submit"] { background: #1DB954; color: white; }
+.muted{ color:#666; font-size:13px }
+button{ padding:8px 12px; border-radius:6px; border:none; cursor:pointer; transition: background-color 0.2s; }
+button:hover{ opacity: 0.9; }
+.error{ color:crimson; background: #ffe0e6; padding: 8px; border-radius: 4px; margin-bottom:8px }
+
+/* Home Page Layout */
+.home{ display:flex; gap:20px }
+.left{ flex:2 }
+.right{ flex:1 }
+
+/* Track Card */
+.track-card{ display:flex; justify-content:space-between; align-items:center; background:#fff; padding:12px; margin:8px 0; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,0.05); }
+.track-card button{ background: #1DB954; color: white; }
+.track-card a button { background: #ddd; color: #111; }
+
+/* Player (Fixed Footer) */
+footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 10px 20px;
+    background: #282828;
+    color: white;
+    box-shadow: 0 -2px 10px rgba(0,0,0,0.5);
+    z-index: 100;
+}
+.player {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    max-width: 1200px;
+    margin: 0 auto;
+}
+.player audio {
+    width: 60%;
+    margin-left: 20px;
+}
+.player .muted {
+    color: #b3b3b3;
+}
